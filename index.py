@@ -1,7 +1,7 @@
 import pygame
 import math
-
-# Necessário arrumar colisão com o gol
+import cv2
+import mediapipe as mp
 
 # Inicializa o Pygame
 pygame.init()
@@ -18,13 +18,21 @@ BLUE = (0, 0, 255)
 WHITE = (255, 255, 255)
 
 # Definir os discos
-initial_blue_disc = {"pos": [WIDTH // 2, HEIGHT // 2], "radius": 15, "velocity": [3, 3]}
-initial_red_disc1 = {"pos": [100, HEIGHT // 2], "radius": 30, "velocity": [0, 2]}  # Velocidade vertical
-initial_red_disc2 = {"pos": [WIDTH - 100, HEIGHT // 2], "radius": 30, "velocity": [0, 2]}  # Velocidade vertical
+initial_black_disc = {"pos": [WIDTH // 2, HEIGHT // 2], "radius": 15, "velocity": [3, 3]}
+initial_red_disc = {"pos": [100, HEIGHT // 2], "radius": 30, "velocity": [0, 2]}  # Disco vermelho
+initial_blue_disc = {"pos": [WIDTH - 100, HEIGHT // 2], "radius": 30, "velocity": [0, 2]}  # Disco azul
 
+black_disc = initial_black_disc.copy()
+red_disc = initial_red_disc.copy()
 blue_disc = initial_blue_disc.copy()
-red_disc1 = initial_red_disc1.copy()
-red_disc2 = initial_red_disc2.copy()
+
+# Inicializa o MediaPipe
+mp_hands = mp.solutions.hands
+mp_drawing = mp.solutions.drawing_utils
+
+# Configurar o detector de mãos
+hands = mp_hands.Hands()
+cap = cv2.VideoCapture(0)
 
 # Variável para controlar a execução do jogo
 running = True
@@ -35,16 +43,16 @@ def check_collision_circle(disc1, disc2):
     return dist < disc1["radius"] + disc2["radius"]
 
 # Função para refletir o movimento do disco com base na colisão
-def reflect_velocity(blue, red):
-    dx = blue["pos"][0] - red["pos"][0]
-    dy = blue["pos"][1] - red["pos"][1]
+def reflect_velocity(moving_disc, stationary_disc):
+    dx = moving_disc["pos"][0] - stationary_disc["pos"][0]
+    dy = moving_disc["pos"][1] - stationary_disc["pos"][1]
     distance = math.hypot(dx, dy)
     if distance == 0:
         return  # Evitar divisão por zero
     nx, ny = dx / distance, dy / distance  # Vetor normalizado
-    dot_product = blue["velocity"][0] * nx + blue["velocity"][1] * ny
-    blue["velocity"][0] -= 2 * dot_product * nx
-    blue["velocity"][1] -= 2 * dot_product * ny
+    dot_product = moving_disc["velocity"][0] * nx + moving_disc["velocity"][1] * ny
+    moving_disc["velocity"][0] -= 2 * dot_product * nx
+    moving_disc["velocity"][1] -= 2 * dot_product * ny
 
 # Função para verificar colisão com bordas e corrigir sobreposição
 def check_boundary_collision(disc, velocity, boundaries):
@@ -63,38 +71,38 @@ def check_boundary_collision(disc, velocity, boundaries):
     return velocity
 
 # Função para corrigir a sobreposição após a colisão
-def correct_overlap(blue, red):
-    dx = blue["pos"][0] - red["pos"][0]
-    dy = blue["pos"][1] - red["pos"][1]
+def correct_overlap(disc1, disc2):
+    dx = disc1["pos"][0] - disc2["pos"][0]
+    dy = disc1["pos"][1] - disc2["pos"][1]
     distance = math.hypot(dx, dy)
     if distance == 0:
         return  # Evitar divisão por zero
-    overlap = blue["radius"] + red["radius"] - distance
+    overlap = disc1["radius"] + disc2["radius"] - distance
     if overlap > 0:
         move_x = (dx / distance) * overlap / 2  # Dividir o movimento entre os dois
         move_y = (dy / distance) * overlap / 2
-        blue["pos"][0] += move_x
-        blue["pos"][1] += move_y
-        red["pos"][0] -= move_x
-        red["pos"][1] -= move_y
+        disc1["pos"][0] += move_x
+        disc1["pos"][1] += move_y
+        disc2["pos"][0] -= move_x
+        disc2["pos"][1] -= move_y
 
 # Função para movimentar discos vermelhos verticalmente
-def move_red_discs(red_disc):
-    red_disc["pos"][1] += red_disc["velocity"][1]
-    if red_disc["pos"][1] - red_disc["radius"] <= 0 or red_disc["pos"][1] + red_disc["radius"] >= HEIGHT:
-        red_disc["velocity"][1] = -red_disc["velocity"][1]
+def move_red_discs(disc):
+    disc["pos"][1] += disc["velocity"][1]
+    if disc["pos"][1] - disc["radius"] <= 0 or disc["pos"][1] + disc["radius"] >= HEIGHT:
+        disc["velocity"][1] = -disc["velocity"][1]
 
 # Função para reiniciar o estado das bolinhas
 def reset_game():
-    global blue_disc, red_disc1, red_disc2
+    global black_disc, red_disc, blue_disc
+    black_disc = initial_black_disc.copy()
+    red_disc = initial_red_disc.copy()
     blue_disc = initial_blue_disc.copy()
-    red_disc1 = initial_red_disc1.copy()
-    red_disc2 = initial_red_disc2.copy()
 
 # Função para verificar se o disco azul tocou as áreas de gol
 def check_goal_area_collision(disc):
     left_goal = pygame.Rect(29, HEIGHT // 2 - 50, 5, 100)  # Área de gol esquerda
-    right_goal_rect = pygame.Rect(WIDTH + 33, HEIGHT // 2 - 50, WIDTH + 33, HEIGHT // 2 + 50)  # Área de gol direita
+    right_goal_rect = pygame.Rect(WIDTH + 33, HEIGHT // 2 - 50, 5, 100)  # Área de gol direita
     return left_goal.collidepoint(disc["pos"]) or right_goal_rect.collidepoint(disc["pos"])
 
 # Função principal do jogo
@@ -103,56 +111,89 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-    # Movimento do disco azul
-    blue_disc["pos"][0] += blue_disc["velocity"][0]
-    blue_disc["pos"][1] += blue_disc["velocity"][1]
+    # Captura frame a frame
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Converter a imagem para RGB
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # Processar a imagem para detectar mãos
+    results = hands.process(rgb_frame)
+
+    # Se forem detectadas mãos
+    if results.multi_hand_landmarks:
+        if len(results.multi_hand_landmarks) >= 2:
+            # Obter as coordenadas das mãos
+            hand_landmarks1 = results.multi_hand_landmarks[0]
+            hand_landmarks2 = results.multi_hand_landmarks[1]
+
+            # Calcular a posição média das mãos para os discos
+            x_coords1 = [lm.x for lm in hand_landmarks1.landmark]
+            y_coords1 = [lm.y for lm in hand_landmarks1.landmark]
+            x_center1 = sum(x_coords1) / len(x_coords1)
+            y_center1 = sum(y_coords1) / len(y_coords1)
+            # Ajuste da posição para o disco vermelho (mão 1)
+            red_disc["pos"] = [x_center1 * WIDTH + 30, y_center1 * HEIGHT]
+
+            x_coords2 = [lm.x for lm in hand_landmarks2.landmark]
+            y_coords2 = [lm.y for lm in hand_landmarks2.landmark]
+            x_center2 = sum(x_coords2) / len(x_coords2)
+            y_center2 = sum(y_coords2) / len(y_coords2)
+            # Ajuste da posição para o disco azul (mão 2)
+            blue_disc["pos"] = [x_center2 * WIDTH + 30, y_center2 * HEIGHT]
+
+    # Movimento do disco preto
+    black_disc["pos"][0] += black_disc["velocity"][0]
+    black_disc["pos"][1] += black_disc["velocity"][1]
 
     # Verificar colisão com as áreas de gol
-    if check_goal_area_collision(blue_disc):
+    if check_goal_area_collision(black_disc):
         reset_game()  # Reiniciar o estado das bolinhas
-        blue_disc["pos"] = [WIDTH // 2, HEIGHT // 2]  # Reposicionar o disco preto no centro
-        blue_disc["velocity"] = [3, 3]  # Reiniciar a velocidade
+        black_disc["pos"] = [WIDTH // 2, HEIGHT // 2]  # Reposicionar o disco preto no centro
+        black_disc["velocity"] = [3, 3]  # Reiniciar a velocidade
         continue  # Ir para o próximo quadro
 
-    # Verificar colisão com bordas para o disco azul
-    blue_disc["velocity"] = check_boundary_collision(blue_disc, blue_disc["velocity"], screen.get_rect())
+    # Verificar colisão com bordas para o disco preto
+    black_disc["velocity"] = check_boundary_collision(black_disc, black_disc["velocity"], screen.get_rect())
 
     # Verificar colisão com os discos vermelhos
-    if check_collision_circle(blue_disc, red_disc1):
-        reflect_velocity(blue_disc, red_disc1)
-        correct_overlap(blue_disc, red_disc1)  # Corrigir sobreposição
+    if check_collision_circle(black_disc, red_disc):
+        reflect_velocity(black_disc, red_disc)
+        correct_overlap(black_disc, red_disc)  # Corrigir sobreposição
 
-    if check_collision_circle(blue_disc, red_disc2):
-        reflect_velocity(blue_disc, red_disc2)
-        correct_overlap(blue_disc, red_disc2)  # Corrigir sobreposição
+    if check_collision_circle(black_disc, blue_disc):
+        reflect_velocity(black_disc, blue_disc)
+        correct_overlap(black_disc, blue_disc)  # Corrigir sobreposição
 
-    # Movimento vertical dos discos vermelhos
-    move_red_discs(red_disc1)
-    move_red_discs(red_disc2)
+    # Movimento vertical dos discos vermelhos e azul
+    move_red_discs(red_disc)
+    move_red_discs(blue_disc)
 
-    # Verificar colisão com bordas para os discos vermelhos 
-    red_disc1["velocity"] = check_boundary_collision(red_disc1, red_disc1["velocity"], screen.get_rect())
-    red_disc2["velocity"] = check_boundary_collision(red_disc2, red_disc2["velocity"], screen.get_rect())
+    # Verificar colisão com bordas para os discos vermelhos e azul
+    red_disc["velocity"] = check_boundary_collision(red_disc, red_disc["velocity"], screen.get_rect())
+    blue_disc["velocity"] = check_boundary_collision(blue_disc, blue_disc["velocity"], screen.get_rect())
 
     # Desenhar o cenário
     screen.fill(WHITE)
-    pygame.draw.line(screen, BLACK, (30, 0), (WIDTH + 30, 0), 5) # Borda superior
-    pygame.draw.line(screen, BLACK, (30, HEIGHT), (WIDTH + 30, HEIGHT), 5) # Borda inferior
+    pygame.draw.line(screen, BLACK, (30, 0), (WIDTH + 30, 0), 5)  # Borda superior
+    pygame.draw.line(screen, BLACK, (30, HEIGHT), (WIDTH + 30, HEIGHT), 5)  # Borda inferior
 
-    pygame.draw.line(screen, BLACK, (30, 0), (30, HEIGHT // 2 - 50), 5) # Lateral esquerda superior
-    pygame.draw.line(screen, BLACK, (30, HEIGHT // 2 + 50), (30, HEIGHT), 5) # Lateral esquerda inferior
+    pygame.draw.line(screen, BLACK, (30, 0), (30, HEIGHT // 2 - 50), 5)  # Lateral esquerda superior
+    pygame.draw.line(screen, BLACK, (30, HEIGHT // 2 + 50), (30, HEIGHT), 5)  # Lateral esquerda inferior
 
-    pygame.draw.line(screen, BLACK, (WIDTH + 30, 0), (WIDTH + 30, HEIGHT // 2 - 50), 5) # Lateral direita superior
-    pygame.draw.line(screen, BLACK, (WIDTH + 30, HEIGHT // 2 + 50), (WIDTH + 30, HEIGHT), 5) # Lateral direita inferior
+    pygame.draw.line(screen, BLACK, (WIDTH + 30, 0), (WIDTH + 30, HEIGHT // 2 - 50), 5)  # Lateral direita superior
+    pygame.draw.line(screen, BLACK, (WIDTH + 30, HEIGHT // 2 + 50), (WIDTH + 30, HEIGHT), 5)  # Lateral direita inferior
     
     # Desenhar as traves
-    pygame.draw.line(screen, RED, (27, HEIGHT // 2 - 50), (27, HEIGHT // 2 + 50), 5) # Trave esquerda
-    pygame.draw.line(screen, BLUE, (WIDTH + 33, HEIGHT // 2 - 50),(WIDTH + 33, HEIGHT // 2 + 50),5)
+    pygame.draw.line(screen, RED, (27, HEIGHT // 2 - 50), (27, HEIGHT // 2 + 50), 5)  # Trave esquerda
+    pygame.draw.line(screen, BLUE, (WIDTH + 33, HEIGHT // 2 - 50), (WIDTH + 33, HEIGHT // 2 + 50), 5)
 
     # Desenhar os discos
-    pygame.draw.circle(screen, BLACK, blue_disc["pos"], blue_disc["radius"])  # Disco azul
-    pygame.draw.circle(screen, RED, red_disc1["pos"], red_disc1["radius"])  # Disco vermelho 1
-    pygame.draw.circle(screen, BLUE, red_disc2["pos"], red_disc2["radius"])  # Disco vermelho 2
+    pygame.draw.circle(screen, BLACK, (int(black_disc["pos"][0]), int(black_disc["pos"][1])), black_disc["radius"])  # Disco preto
+    pygame.draw.circle(screen, RED, (int(red_disc["pos"][0]), int(red_disc["pos"][1])), red_disc["radius"])  # Disco vermelho
+    pygame.draw.circle(screen, BLUE, (int(blue_disc["pos"][0]), int(blue_disc["pos"][1])), blue_disc["radius"])  # Disco azul
 
     # Atualizar a tela
     pygame.display.flip()
@@ -160,5 +201,7 @@ while running:
     # Controlar a taxa de quadros
     pygame.time.Clock().tick(60)
 
-# Finalizar o Pygame
+# Finalizar o Pygame e o MediaPipe
+cap.release()
 pygame.quit()
+cv2.destroyAllWindows()
