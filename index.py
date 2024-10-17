@@ -1,4 +1,5 @@
 import sys
+import time
 import math
 import pygame
 import cv2
@@ -35,7 +36,7 @@ circle_colors = [
 ]
 
 # Constantes de física
-FRICTION = 0.98
+FRICTION = 1  # Se quiser fricção, só alterar para um valor entre 0 e 1
 FORCE_MULTIPLIER = 1.2
 MAX_SPEED = 20
 
@@ -51,12 +52,15 @@ main_rect_height = height - 250
 main_rect_x = (width - main_rect_width) // 2  # 100
 main_rect_y = (height - main_rect_height) // 2
 mid_x = width // 2
+mid_y = height // 2
 
 # Discs positions [x, y]
-blue_disc = [main_rect_x + main_rect_width // 4, height // 2]
-red_disc = [main_rect_x + 3 * main_rect_width // 4, height // 2]
-black_disc = [mid_x - main_rect_width // 8, height // 2]
-initial_black_disc_pos = [mid_x - main_rect_width // 8, height // 2]
+blue_disc = [main_rect_x + main_rect_width // 4, mid_y]
+red_disc = [main_rect_x + 3 * main_rect_width // 4, mid_y]
+black_disc = [mid_x - main_rect_width // 8, mid_y]  # P1
+initial_black_disc_pos = [width // 2, mid_y]
+restart_black_disc_pos_p1 = [mid_x - main_rect_width // 8, mid_y]
+restart_black_disc_pos_p2 = [mid_x + main_rect_width // 8, mid_y]
 
 # Velocidade inicial do disco preto
 black_disc_vel = [0, 0]
@@ -88,13 +92,13 @@ def draw_main_rectangle():
         screen,
         BLACK,
         (main_rect_x, main_rect_y),
-        (main_rect_x, height // 2 - 100),
+        (main_rect_x, mid_y - 100),
         border_thickness,
     )
     pygame.draw.line(
         screen,
         BLACK,
-        (main_rect_x, height // 2 + 100),
+        (main_rect_x, mid_y + 100),
         (main_rect_x, main_rect_y + main_rect_height),
         border_thickness,
     )
@@ -103,13 +107,13 @@ def draw_main_rectangle():
         screen,
         BLACK,
         (main_rect_x + main_rect_width, main_rect_y),
-        (main_rect_x + main_rect_width, height // 2 - 100),
+        (main_rect_x + main_rect_width, mid_y - 100),
         border_thickness,
     )
     pygame.draw.line(
         screen,
         BLACK,
-        (main_rect_x + main_rect_width, height // 2 + 100),
+        (main_rect_x + main_rect_width, mid_y + 100),
         (main_rect_x + main_rect_width, main_rect_y + main_rect_height),
         border_thickness,
     )
@@ -125,21 +129,21 @@ def draw_main_rectangle():
 
 
 def draw_green_lines():
-    green_line_top = height // 2 - 100
-    green_line_bottom = height // 2 + 100
+    green_line_top = mid_y - 100
+    green_line_bottom = mid_y + 100
     pygame.draw.line(
         screen,
         GREEN,
-        (main_rect_x - 5, green_line_top),
-        (main_rect_x - 5, green_line_bottom),
-        border_thickness,
+        (main_rect_x + 1, green_line_top),
+        (main_rect_x + 1, green_line_bottom),
+        border_thickness + 2,
     )
     pygame.draw.line(
         screen,
         GREEN,
-        (main_rect_x + main_rect_width + 5, green_line_top),
-        (main_rect_x + main_rect_width + 5, green_line_bottom),
-        border_thickness,
+        (main_rect_x + main_rect_width - 1, green_line_top),
+        (main_rect_x + main_rect_width - 1, green_line_bottom),
+        border_thickness + 2,
     )
 
 
@@ -241,47 +245,93 @@ def move_black_disc():
         black_disc_vel[0], black_disc_vel[1] = 0, 0
 
 
-# Verifica colisão com as linhas verdes
+# Verifica colisão com as linhas verdes (gols)
 def check_goal():
     global blue_score, red_score
 
-    green_line_top = height // 2 - 100
-    green_line_bottom = height // 2 + 100
+    green_line_top = mid_y - 100
+    green_line_bottom = mid_y + 100
 
-    # Se o disco preto colidir com a linha verde esquerda (Ponto para o jogador vermelho)
+    # Ajustando a posição das linhas verdes para um ponto mais acessível dentro dos limites do campo
+    # Verifica a colisão com a linha verde esquerda (Ponto para o jogador vermelho)
     if (
-        main_rect_x - 5 <= black_disc[0] <= main_rect_x + 5
-        and green_line_top <= black_disc[1] <= green_line_bottom
+        main_rect_x <= black_disc[0] <= main_rect_x + 15
+        and green_line_top - 10 <= black_disc[1] <= green_line_bottom + 10
     ):
         red_score += 1
         update_scoreboard("red")
-        reset_black_disc()
+        reset_black_disc("red")
 
-    # Se o disco preto colidir com a linha verde direita (Ponto para o jogador azul)
+    # Verifica a colisão com a linha verde direita (Ponto para o jogador azul)
     if (
-        main_rect_x + main_rect_width - 5
+        main_rect_x + main_rect_width - 15
         <= black_disc[0]
-        <= main_rect_x + main_rect_width + 5
-        and green_line_top <= black_disc[1] <= green_line_bottom
+        <= main_rect_x + main_rect_width
+        and green_line_top - 10 <= black_disc[1] <= green_line_bottom + 10
     ):
         blue_score += 1
         update_scoreboard("blue")
-        reset_black_disc()
+        reset_black_disc("blue")
 
 
 # Atualiza o placar visual e muda a cor dos círculos
 def update_scoreboard(player):
-    for i in range(5):
-        if player == "blue" and blue_score > i:
+    if player == "blue":
+        for i in range(blue_score):
             circle_colors[i] = BLUE
-        elif player == "red" and red_score > i:
-            circle_colors[i] = RED
+    elif player == "red":
+        for i in range(red_score):
+            circle_colors[-(i + 1)] = RED
 
 
-def reset_black_disc():
+def reset_black_disc(player):
     # Reinicia a posição do disco preto e a velocidade
-    black_disc[0], black_disc[1] = initial_black_disc_pos
-    black_disc_vel[0], black_disc_vel[1] = 0, 0
+    if player == "blue":
+        black_disc[0], black_disc[1] = restart_black_disc_pos_p2
+    elif player == "red":
+        black_disc[0], black_disc[1] = restart_black_disc_pos_p1
+    black_disc_vel[0], black_disc_vel[1] = 0, 0  # Reinicia a velocidade
+
+
+def check_match():
+    if blue_score == 3:
+        print("Jogador Azul venceu!")
+        # Limpa a tela
+        screen.fill(WHITE)
+        # Define a fonte e o texto para o jogador azul
+        font = pygame.font.Font(None, 256)
+        text_blue_win = font.render("P1 Ganhou!", True, BLUE)
+        text_rect = text_blue_win.get_rect(center=(width // 2, mid_y))
+        # Desenha o texto
+        screen.blit(text_blue_win, text_rect)
+        # Atualiza a tela
+        pygame.display.flip()
+        # Mantém a tela até o usuário fechar ou pressionar uma tecla
+        wait_for_exit()
+
+    elif red_score == 3:
+        print("Jogador Vermelho venceu!")
+        # Limpa a tela
+        screen.fill(WHITE)
+        # Define a fonte e o texto para o jogador vermelho
+        font = pygame.font.Font(None, 256)
+        text_red_win = font.render("P2 Ganhou!", True, RED)
+        text_rect = text_red_win.get_rect(center=(width // 2, mid_y))
+        # Desenha o texto
+        screen.blit(text_red_win, text_rect)
+        # Atualiza a tela
+        pygame.display.flip()
+        # Mantém a tela até o usuário fechar ou pressionar uma tecla
+        wait_for_exit()
+
+
+# Função para esperar o usuário pressionar uma tecla ou fechar a janela
+def wait_for_exit():
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN):
+                pygame.quit()
+                sys.exit()
 
 
 # Main game loop
@@ -375,6 +425,9 @@ def main():
 
         # Verifica se o disco preto atingiu as linhas verdes (gols)
         check_goal()
+
+        # Verifica se a partida finalizou
+        check_match()
 
         # Draw the discs
         draw_disc()
